@@ -11,7 +11,9 @@ import { renderRoutes } from 'react-router-config';
 import { StaticRouter } from 'react-router-dom';
 import serverRoutes from '../frontend/routes/serverRoutes';
 import reducer from '../frontend/reducers';
+import Layout from '../frontend/components/Layout';
 import initialState from '../frontend/initialState';
+import getManifest from './getManifest';
 
 const { config } = require('./config');
 
@@ -28,25 +30,34 @@ if (config.env === 'development') {
   app.use(webpackDevMiddleware(compiler, serverConfig));
   app.use(webpackHotMiddleware(compiler));
 } else {
+  app.use((req, res, next) => {
+    if (!req.hashManifest) req.hashManifest = getManifest();
+    next();
+  });
   app.use(express.static(`${__dirname}/public`));
   app.use(helmet());
   app.use(helmet.permittedCrossDomainPolicies());
   app.disable('x-powered-by');
 }
 
-function setResponse(html, preloadedState) {
+function setResponse(html, preloadedState, manifest) {
+  const mainStyles = manifest ? manifest['main.css'] : 'assets/app.css';
+  const mainBuild = manifest ? manifest['main.js'] : 'assets/app.js';
+  const vendorBuild = manifest ? manifest['vendors.js'] : 'assets/vendors.js';
+
   return `
   <!DOCTYPE html>
     <html>
       <head>
         <title>Platzi Video</title>
-        <link rel="stylesheet" href="assets/app.css" type="text/css">
+        <link rel="stylesheet" href="${mainStyles}" type="text/css">
       </head>
       <body>
         <div id="app">${html}</div>
         <script>window.__PRELOADED_STATE__ = ${JSON.stringify(preloadedState).replace(/</g, '\\u003c')}
         </script>
-        <script src="assets/app.js" type="text/javascript"></script>
+        <script src="${mainBuild}" type="text/javascript"></script>
+        <script src="${vendorBuild}" type="text/javascript"></script>
       </body>
     </html> 
     `;
@@ -58,12 +69,14 @@ const renderApp = (req, res) => {
   const html = renderToString(
     <Provider store={store}>
       <StaticRouter location={req.url} context={{}}>
-        {renderRoutes(serverRoutes)}
+        <Layout>
+          {renderRoutes(serverRoutes)}
+        </Layout>
       </StaticRouter>
     </Provider>,
   );
 
-  res.send(setResponse(html, preloadedState));
+  res.send(setResponse(html, preloadedState, req.hashManifest));
 };
 
 app.get('*', renderApp);
